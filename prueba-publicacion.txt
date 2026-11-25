@@ -1,0 +1,1 @@
+Prueba aislada de permisos de escritura. No modifica el canal oficial de actualizaciones.
