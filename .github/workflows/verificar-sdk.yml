@@ -1,0 +1,34 @@
+name: Verificar compilador Android
+on:
+  push:
+    branches: [prueba-publicacion]
+    paths: ['.github/workflows/verificar-sdk.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Localizar herramientas oficiales del runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          platform="$(find "$sdk/platforms" -name android.jar | sort -V | tail -1)"
+          tools="$(find "$sdk/build-tools" -name d8 | sort -V | tail -1)"
+          test -f "$platform"
+          test -f "$tools"
+          mkdir -p "$RUNNER_TEMP/android-compiler"
+          cp "$platform" "$RUNNER_TEMP/android-compiler/android.jar"
+          cp "$(dirname "$tools")/lib/d8.jar" "$RUNNER_TEMP/android-compiler/d8.jar"
+          java -version
+          java -cp "$RUNNER_TEMP/android-compiler/d8.jar" com.android.tools.r8.D8 --version
+      - name: Guardar herramientas de compilacion
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-compiler
+          path: ${{ runner.temp }}/android-compiler/
+          retention-days: 1
+          if-no-files-found: error
