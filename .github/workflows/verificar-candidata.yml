@@ -1,0 +1,98 @@
+name: Verificar APK candidato 1.17
+on:
+  push:
+    branches: [prueba-publicacion]
+    paths: ['Finca_San_Nicolas_Android_1_17_candidata.apk', '.github/workflows/verificar-candidata.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtener APK y comprobar integridad
+        env:
+          BASE: https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas
+          EXPECTED: 1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_17_candidata.apk" -o candidate.apk
+          curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_16.apk" -o original.apk
+          echo "$EXPECTED  candidate.apk" | sha256sum -c -
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          signer="$(find "$sdk/build-tools" -name apksigner | sort -V | tail -1)"
+          test -x "$signer"
+          "$signer" verify --verbose --print-certs candidate.apk | tee candidate-signature.txt
+          "$signer" verify --verbose --print-certs original.apk | tee original-signature.txt
+          diff <(grep 'certificate SHA-256 digest:' candidate-signature.txt) <(grep 'certificate SHA-256 digest:' original-signature.txt)
+          aapt="$(dirname "$signer")/aapt"
+          "$aapt" dump badging candidate.apk | tee candidate-manifest.txt
+          grep -F "package: name='com.fincasannicolas.avicola' versionCode='202611247' versionName='1.17'" candidate-manifest.txt
+          unzip -t candidate.apk
+      - name: Conservar resultados
+        uses: actions/upload-artifact@v4
+        with:
+          name: verificacion-candidata
+          path: |
+            candidate-signature.txt
+            original-signature.txt
+            candidate-manifest.txt
+          retention-days: 7
+  android-smoke:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Preparar Android de prueba
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          export PATH="$sdk/emulator:$sdk/platform-tools:$sdk/cmdline-tools/latest/bin:$PATH"
+          test -e /dev/kvm
+          if [ ! -w /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          image="system-images;android-35;google_apis;x86_64"
+          sdkmanager --install "platform-tools" "emulator" "$image"
+          echo no | avdmanager create avd --force --name finca-test --package "$image" --device pixel_6
+          emulator -avd finca-test -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+          adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 5; done'
+          adb shell input keyevent 82
+      - name: Instalar versión anterior y actualizar sin borrar datos
+        env:
+          BASE: https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_16.apk" -o original.apk
+          curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_17_candidata.apk" -o candidate.apk
+          adb install original.apk
+          adb shell am start -W -n com.fincasannicolas.avicola/.MainActivity
+          sleep 8
+          adb shell dumpsys package com.fincasannicolas.avicola | grep versionCode
+          adb install -r candidate.apk
+          adb shell am start -W -n com.fincasannicolas.avicola/.MainActivity
+          sleep 8
+          adb shell dumpsys package com.fincasannicolas.avicola | grep 'versionCode=202611247'
+          adb shell input keyevent 4
+          sleep 3
+          adb shell uiautomator dump /sdcard/finca.xml
+          adb pull /sdcard/finca.xml back-screen.xml
+          grep -F 'Cerrar Finca San Nicolás' back-screen.xml
+          adb shell input keyevent 4
+          adb shell pidof com.fincasannicolas.avicola
+          adb shell screencap -p /sdcard/finca.png
+          adb pull /sdcard/finca.png android-screen.png
+          adb logcat -d -s AndroidRuntime:E > runtime.log
+          if grep -F 'FATAL EXCEPTION' runtime.log; then exit 1; fi
+      - name: Evidencia Android
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencia-android-candidata
+          path: |
+            emulator.log
+            back-screen.xml
+            android-screen.png
+            runtime.log
+          if-no-files-found: warn
+          retention-days: 7
