@@ -51,13 +51,32 @@ jobs:
           export PATH="$sdk/emulator:$sdk/platform-tools:$sdk/cmdline-tools/latest/bin:$PATH"
           test -e /dev/kvm
           if [ ! -w /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+          export ANDROID_USER_HOME="$RUNNER_TEMP/finca-android"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          unset ANDROID_SDK_HOME
+          mkdir -p "$ANDROID_AVD_HOME"
           image="system-images;android-35;google_apis;x86_64"
-          sdkmanager --install "platform-tools" "emulator" "$image"
-          echo no | avdmanager create avd --force --name finca-test --package "$image" --device pixel_6
-          emulator -avd finca-test -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
-          adb wait-for-device
-          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = 1 ]; do sleep 5; done'
-          adb shell input keyevent 82
+          timeout 600 sdkmanager --install "platform-tools" "emulator" "$image"
+          printf "no\n" | timeout 120 avdmanager create avd --force --name finca-test --package "$image" --device pixel_6 --path "$ANDROID_AVD_HOME/finca-test.avd"
+          test -s "$ANDROID_AVD_HOME/finca-test.avd/config.ini"
+          printf "avd.ini.encoding=UTF-8\npath=%s\ntarget=android-35\n" "$ANDROID_AVD_HOME/finca-test.avd" > "$ANDROID_AVD_HOME/finca-test.ini"
+          emulator -list-avds | grep -Fx finca-test
+          emulator -accel-check
+          adb start-server
+          emulator -avd finca-test -port 5554 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+          emu_pid=$!
+          ready=0
+          for i in $(seq 1 120); do
+            if ! kill -0 "$emu_pid" 2>/dev/null; then cat emulator.log; exit 1; fi
+            if [ "$(timeout 5 adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d "\r" || true)" = 1 ]; then ready=1; break; fi
+            sleep 3
+          done
+          if [ "$ready" != 1 ]; then cat emulator.log; adb devices -l; exit 1; fi
+          adb -s emulator-5554 shell input keyevent 82
+          adb -s emulator-5554 shell settings put global window_animation_scale 0
+          adb -s emulator-5554 shell settings put global transition_animation_scale 0
+          adb -s emulator-5554 shell settings put global animator_duration_scale 0
       - name: Instalar versión anterior y actualizar sin borrar datos
         env:
           BASE: https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas
