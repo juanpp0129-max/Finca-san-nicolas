@@ -1,0 +1,47 @@
+name: Publicar Finca San Nicolas 1.17 verificada
+on:
+  workflow_run:
+    workflows: ["Verificar APK candidato 1.17"]
+    types: [completed]
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: ${{ github.event.workflow_run.id == 45847265510 && github.event.workflow_run.head_sha == '0908be28caa24e2d792e44bdfb458fd4c3b0aea6' && github.event.workflow_run.head_branch == 'prueba-publicacion' && github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Verificar y publicar solamente el APK aprobado
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path("version.json").read_text())
+          if m["versionCode"] != 202611246 or m["versionName"] != "1.16":
+              raise SystemExit("Canal oficial distinto de 1.16: no se publica")
+          PY
+          target="Finca_San_Nicolas_Android_1_17.apk"
+          test ! -e "$target"
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas/0908be28caa24e2d792e44bdfb458fd4c3b0aea6/Finca_San_Nicolas_Android_1_17_candidata.apk" -o "$target"
+          echo "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c  $target" | sha256sum -c -
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m = {
+              "versionCode": 202611247,
+              "versionName": "1.17",
+              "sha256": "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c",
+              "apkUrl": "https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas/main/Finca_San_Nicolas_Android_1_17.apk"
+          }
+          Path("version.json").write_text(json.dumps(m, indent=2) + "\n")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$target" version.json
+          git commit -m "Publicar Android 1.17 tras prueba nativa exitosa"
+          git push origin HEAD:main
