@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   publish:
-    if: ${{ github.event.workflow_run.head_sha == '914567f43547c0ff95592a393089de4ca53486cb' && github.event.workflow_run.head_branch == 'prueba-publicacion' && github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.head_sha == '7fe18bcf1bab1c6affd4584f204d8fdd557e8336' && github.event.workflow_run.head_branch == 'prueba-publicacion' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -27,7 +27,7 @@ jobs:
           PY
           target="Finca_San_Nicolas_Android_1_17.apk"
           test ! -e "$target"
-          curl -fsSL --retry 3 "https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas/914567f43547c0ff95592a393089de4ca53486cb/Finca_San_Nicolas_Android_1_17_candidata.apk" -o "$target"
+          curl -fsSL --retry 3 "https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas/7fe18bcf1bab1c6affd4584f204d8fdd557e8336/Finca_San_Nicolas_Android_1_17_candidata.apk" -o "$target"
           echo "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c  $target" | sha256sum -c -
           python - <<'PY'
           import json
