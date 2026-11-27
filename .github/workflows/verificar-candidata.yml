@@ -77,32 +77,60 @@ jobs:
           adb -s emulator-5554 shell settings put global window_animation_scale 0
           adb -s emulator-5554 shell settings put global transition_animation_scale 0
           adb -s emulator-5554 shell settings put global animator_duration_scale 0
-      - name: Instalar versión anterior y actualizar sin borrar datos
-        env:
-          BASE: https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas
-        run: |
-          set -euo pipefail
+          export ANDROID_SERIAL=emulator-5554
+          ADB="$sdk/platform-tools/adb"
+          test -x "$ADB"
+          "$ADB" version
+          "$ADB" get-state | grep -Fx device
+          BASE="https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas"
           curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_16.apk" -o original.apk
           curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_17_candidata.apk" -o candidate.apk
-          adb install original.apk
-          adb shell am start -W -n com.fincasannicolas.avicola/.MainActivity
+          echo "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c  candidate.apk" | sha256sum -c -
+          package=com.fincasannicolas.avicola
+          activity="$package/.MainActivity"
+          "$ADB" logcat -c
+          timeout 90 "$ADB" install original.apk | tee install-original.log
+          grep -Fx Success install-original.log
+          timeout 60 "$ADB" shell am start -W -n "$activity" | tee start-original.log
+          grep -F "Status: ok" start-original.log
+          "$ADB" shell dumpsys package "$package" > original-package.log
+          grep -F "versionCode=202611246" original-package.log
+          sleep 5
+          "$ADB" shell pidof "$package"
+          "$ADB" shell am force-stop "$package"
+          timeout 90 "$ADB" install -r candidate.apk | tee install-candidate.log
+          grep -Fx Success install-candidate.log
+          timeout 60 "$ADB" shell am start -W -n "$activity" | tee start-candidate.log
+          grep -F "Status: ok" start-candidate.log
+          "$ADB" shell dumpsys package "$package" > candidate-package.log
+          grep -F "versionCode=202611247" candidate-package.log
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          a = Path("original-package.log").read_text()
+          b = Path("candidate-package.log").read_text()
+          for key in ("firstInstallTime", "dataDir"):
+              pattern = rf"^\s*{key}=([^\r\n]+)"
+              before = re.search(pattern, a, re.M)
+              after = re.search(pattern, b, re.M)
+              assert before and after and before.group(1)==after.group(1), f"Changed installation identity: {key}"
+          print("Identidad de la instalación y directorio de datos conservados")
+          PY
           sleep 8
-          adb shell dumpsys package com.fincasannicolas.avicola | grep versionCode
-          adb install -r candidate.apk
-          adb shell am start -W -n com.fincasannicolas.avicola/.MainActivity
-          sleep 8
-          adb shell dumpsys package com.fincasannicolas.avicola | grep 'versionCode=202611247'
-          adb shell input keyevent 4
-          sleep 3
-          adb shell uiautomator dump /sdcard/finca.xml
-          adb pull /sdcard/finca.xml back-screen.xml
-          grep -F 'Cerrar Finca San Nicolás' back-screen.xml
-          adb shell input keyevent 4
-          adb shell pidof com.fincasannicolas.avicola
-          adb shell screencap -p /sdcard/finca.png
-          adb pull /sdcard/finca.png android-screen.png
-          adb logcat -d -s AndroidRuntime:E > runtime.log
-          if grep -F 'FATAL EXCEPTION' runtime.log; then exit 1; fi
+          "$ADB" shell pidof "$package"
+          "$ADB" shell input keyevent 4
+          for i in $(seq 1 5); do
+            sleep 2
+            if timeout 25 "$ADB" shell uiautomator dump /sdcard/finca.xml && "$ADB" pull /sdcard/finca.xml back-screen.xml && grep -Fq "Cerrar Finca San Nicolás" back-screen.xml; then break; fi
+          done
+          grep -F "Cerrar Finca San Nicolás" back-screen.xml
+          "$ADB" shell input keyevent 4
+          sleep 2
+          "$ADB" shell pidof "$package"
+          "$ADB" exec-out screencap -p > android-screen.png
+          test -s android-screen.png
+          "$ADB" logcat -d -s AndroidRuntime:E > runtime.log
+          if grep -F "FATAL EXCEPTION" runtime.log; then exit 1; fi
       - name: Evidencia Android
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,5 +141,11 @@ jobs:
             back-screen.xml
             android-screen.png
             runtime.log
+            install-original.log
+            install-candidate.log
+            start-original.log
+            start-candidate.log
+            original-package.log
+            candidate-package.log
           if-no-files-found: warn
           retention-days: 7
