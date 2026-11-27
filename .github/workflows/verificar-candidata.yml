@@ -1,8 +1,8 @@
-name: Verificar APK candidato 1.17
+name: Verificar APK candidato 1.18
 on:
   push:
     branches: [prueba-publicacion]
-    paths: ['Finca_San_Nicolas_Android_1_17_candidata.apk', '.github/workflows/verificar-candidata.yml']
+    paths: ['Finca_San_Nicolas_Android_1_18_candidata.apk', '.github/workflows/verificar-candidata.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,10 +14,10 @@ jobs:
       - name: Obtener APK y comprobar integridad
         env:
           BASE: https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas
-          EXPECTED: 1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c
+          EXPECTED: 034ee28eeb09f0132edb403f894f8be3f1ec496583aa4fffccfd55b59094895c
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_17_candidata.apk" -o candidate.apk
+          curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_18_candidata.apk" -o candidate.apk
           curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_16.apk" -o original.apk
           echo "$EXPECTED  candidate.apk" | sha256sum -c -
           sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
@@ -28,8 +28,23 @@ jobs:
           diff <(grep 'certificate SHA-256 digest:' candidate-signature.txt) <(grep 'certificate SHA-256 digest:' original-signature.txt)
           aapt="$(dirname "$signer")/aapt"
           "$aapt" dump badging candidate.apk | tee candidate-manifest.txt
-          grep -F "package: name='com.fincasannicolas.avicola' versionCode='202611247' versionName='1.17'" candidate-manifest.txt
+          grep -F "package: name='com.fincasannicolas.avicola' versionCode='202611248' versionName='1.18'" candidate-manifest.txt
           unzip -t candidate.apk
+          curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_17.apk" -o previous.apk
+          echo "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c  previous.apk" | sha256sum -c -
+          python - <<'PY'
+          from zipfile import ZipFile
+          with ZipFile("previous.apk") as a, ZipFile("candidate.apk") as b:
+              assert sorted(a.namelist()) == sorted(b.namelist())
+              changed = {n for n in a.namelist() if a.read(n) != b.read(n)}
+              assert changed == {"AndroidManifest.xml","assets/index.html","assets/sw.js"}, changed
+              assert a.read("classes.dex") == b.read("classes.dex")
+              html = b.read("assets/index.html").decode()
+              for token in ("lotCostDetail","lotDetailPanel","Costo acumulado registrado","Historial del lote","costSummary"):
+                  assert token in html, token
+              assert "avicola_san_nicolas_v1" in html
+              print("Base nativa 1.17 intacta y ficha de lote integrada")
+          PY
       - name: Conservar resultados
         uses: actions/upload-artifact@v4
         with:
@@ -84,17 +99,27 @@ jobs:
           "$ADB" get-state | grep -Fx device
           BASE="https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas"
           curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_16.apk" -o original.apk
-          curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_17_candidata.apk" -o candidate.apk
-          echo "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c  candidate.apk" | sha256sum -c -
+          curl -fsSL --retry 3 "$BASE/$GITHUB_SHA/Finca_San_Nicolas_Android_1_18_candidata.apk" -o candidate.apk
+          echo "034ee28eeb09f0132edb403f894f8be3f1ec496583aa4fffccfd55b59094895c  candidate.apk" | sha256sum -c -
+          curl -fsSL --retry 3 "$BASE/main/Finca_San_Nicolas_Android_1_17.apk" -o previous.apk
+          echo "1fa292aebe3605d00202561fa70a0da6158cd8561b6ca39b97484974f9aaa97c  previous.apk" | sha256sum -c -
           package=com.fincasannicolas.avicola
           activity="$package/.MainActivity"
+          for oldcode in 202611246 202611247; do
+            case "$oldcode" in
+              202611246) source="$PWD/original.apk" ;;
+              202611247) source="$PWD/previous.apk" ;;
+            esac
+            mkdir -p "upgrade-$oldcode"
+            cp candidate.apk "upgrade-$oldcode/candidate.apk"
+            pushd "upgrade-$oldcode" >/dev/null
           "$ADB" logcat -c
-          timeout 90 "$ADB" install original.apk | tee install-original.log
+          timeout 90 "$ADB" install "$source" | tee install-original.log
           grep -Fx Success install-original.log
           timeout 60 "$ADB" shell am start -W -n "$activity" | tee start-original.log
           grep -F "Status: ok" start-original.log
           "$ADB" shell dumpsys package "$package" > original-package.log
-          grep -F "versionCode=202611246" original-package.log
+          grep -F "versionCode=$oldcode" original-package.log
           sleep 5
           "$ADB" shell pidof "$package"
           "$ADB" shell am force-stop "$package"
@@ -103,7 +128,7 @@ jobs:
           timeout 60 "$ADB" shell am start -W -n "$activity" | tee start-candidate.log
           grep -F "Status: ok" start-candidate.log
           "$ADB" shell dumpsys package "$package" > candidate-package.log
-          grep -F "versionCode=202611247" candidate-package.log
+          grep -F "versionCode=202611248" candidate-package.log
           python - <<'PY'
           from pathlib import Path
           import re
@@ -131,6 +156,9 @@ jobs:
           test -s android-screen.png
           "$ADB" logcat -d -s AndroidRuntime:E > runtime.log
           if grep -F "FATAL EXCEPTION" runtime.log; then exit 1; fi
+            popd >/dev/null
+            if [ "$oldcode" = "202611246" ]; then "$ADB" uninstall "$package"; fi
+          done
       - name: Evidencia Android
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,14 +166,6 @@ jobs:
           name: evidencia-android-candidata
           path: |
             emulator.log
-            back-screen.xml
-            android-screen.png
-            runtime.log
-            install-original.log
-            install-candidate.log
-            start-original.log
-            start-candidate.log
-            original-package.log
-            candidate-package.log
+            upgrade-*/
           if-no-files-found: warn
           retention-days: 7
