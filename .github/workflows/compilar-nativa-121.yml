@@ -35,3 +35,9 @@ jobs:
           echo BEGIN_DEX_BASE64
           gzip -n -9 -c dex/classes.dex | base64 -w 120
           echo END_DEX_BASE64
+      - name: Exportar componente compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-121
+          path: dex/classes.dex
+          retention-days: 1
