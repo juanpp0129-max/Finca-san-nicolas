@@ -28,10 +28,10 @@ jobs:
           D8="$(find "$SDK/build-tools" -name d8 | sort -V | tail -1)"
           test -f "$JAR"; test -x "$D8"
           mkdir -p classes dex
-          javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$JAR" -d classes $(find src -name '*.java' | sort)
+          javac -encoding UTF-8 -source 8 -target 8 -classpath "$JAR" -d classes $(find src -name '*.java' | sort)
           "$D8" --release --min-api 24 --lib "$JAR" --output dex $(find classes -name '*.class' | sort)
           test -s dex/classes.dex
           sha256sum dex/classes.dex
           echo BEGIN_DEX_BASE64
-          base64 -w 120 dex/classes.dex
+          gzip -n -9 -c dex/classes.dex | base64 -w 120
           echo END_DEX_BASE64
