@@ -1,0 +1,43 @@
+name: Compilar componente nativo 1.21
+on:
+  pull_request:
+    branches: [main]
+    paths: ['build-native-121.zip', '.github/workflows/compilar-nativa-121.yml']
+permissions:
+  contents: read
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Obtener fuentes verificadas y compilar sin firma
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 "https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas/$HEAD_SHA/build-native-121.zip" -o source.zip
+          unzip -q source.zip
+          sha256sum -c <<'EOF'
+          330ae57dbdaa23fb02c90e965e138929143083934618034c745dc7a221502614  src/com/fincasannicolas/avicola/MainActivity.java
+          8494765c2dcd004276b806b7399f668320f73c2542e27304b43f3f98fe0ed476  src/com/fincasannicolas/avicola/Thermometer.java
+          df9128c73c1bb387bf668b0da8fa4f8053e384bf6b7caf602ea7463f3dac1fcf  src/com/fincasannicolas/avicola/UpdateFileProvider.java
+          e65b28b68c6e3b3305d1e846130d365d34720d8c1f80ca32a08d00ef624f1520  src/com/fincasannicolas/avicola/Updates.java
+          EOF
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          JAR="$(find "$SDK/platforms" -name android.jar | sort -V | tail -1)"
+          D8="$(find "$SDK/build-tools" -name d8 | sort -V | tail -1)"
+          test -f "$JAR"; test -x "$D8"
+          mkdir -p classes dex
+          javac -encoding UTF-8 -source 8 -target 8 -classpath "$JAR" -d classes $(find src -name '*.java' | sort)
+          "$D8" --release --min-api 24 --lib "$JAR" --output dex $(find classes -name '*.class' | sort)
+          test -s dex/classes.dex
+          sha256sum dex/classes.dex
+          echo BEGIN_DEX_BASE64
+          gzip -n -9 -c dex/classes.dex | base64 -w 120
+          echo END_DEX_BASE64
+      - name: Exportar componente compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: dex-121
+          path: dex/classes.dex
+          retention-days: 1

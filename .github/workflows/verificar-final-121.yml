@@ -1,0 +1,40 @@
+name: Verificar Android 1.21 final
+on:
+  pull_request:
+    branches: [main]
+    paths: ['Finca_San_Nicolas_Android_1_21.apk', '.github/workflows/verificar-final-121.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verificar APK firmado y compatibilidad con 1.20
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          BASE=https://raw.githubusercontent.com/juanpp0129-max/Finca-san-nicolas
+          curl -fsSL --retry 2 "$BASE/$HEAD_SHA/Finca_San_Nicolas_Android_1_21.apk" -o new.apk
+          curl -fsSL --retry 2 "$BASE/main/Finca_San_Nicolas_Android_1_20.apk" -o old.apk
+          echo 'a33029151cb13587384e636cb1ca50f5233f130f8a4c78440fda412bbb3f0990  new.apk' | sha256sum -c -
+          echo 'abe1ae90edcf5b69571185f023b9c28beb8579610d7d04f2dd9130aa71efb5bc  old.apk' | sha256sum -c -
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          signer="$(find "$SDK/build-tools" -name apksigner | sort -V | tail -1)"
+          aapt="$(dirname "$signer")/aapt"
+          "$signer" verify --verbose --print-certs old.apk | tee old-signature.txt
+          "$signer" verify --verbose --print-certs new.apk | tee new-signature.txt
+          diff <(grep 'certificate SHA-256 digest:' old-signature.txt) <(grep 'certificate SHA-256 digest:' new-signature.txt)
+          "$aapt" dump badging new.apk | tee new-manifest.txt
+          grep -F "package: name='com.fincasannicolas.avicola' versionCode='202611251' versionName='1.21'" new-manifest.txt
+          diff <("$aapt" dump permissions old.apk) <("$aapt" dump permissions new.apk)
+          unzip -t new.apk
+          python - <<'PY'
+          import hashlib,zipfile
+          with zipfile.ZipFile('old.apk') as a,zipfile.ZipFile('new.apk') as b:
+              assert a.namelist()==b.namelist()
+              assert {n for n in a.namelist() if a.read(n)!=b.read(n)}=={'AndroidManifest.xml','classes.dex','assets/index.html','assets/sw.js'}
+              assert hashlib.sha256(b.read('classes.dex')).hexdigest()=='217c26493aef22cfe3889495fde7cc1aeb135c02797539f5fd134e0a1ff3b7d4'
+              print('Firma, permisos, recursos y componente nativo verificados')
+          PY
